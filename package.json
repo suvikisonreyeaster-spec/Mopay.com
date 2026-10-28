@@ -1,0 +1,11 @@
+{
+  "name": "mopay",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^10.0.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^4.0.0"
+  }
+}

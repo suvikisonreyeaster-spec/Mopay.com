@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mopay — Upload</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #181b22;
+      --line: #2a2f3a;
+      --text: #f2f4f8;
+      --muted: #9aa3b2;
+      --accent: #19c37d;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 1.75rem; margin: 0 0 4px; }
+    h2 { font-size: 1.1rem; margin: 32px 0 12px; }
+    p.lead { color: var(--muted); margin: 0 0 24px; }
+
+    .pickers { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+    /* The real <input type="file"> sits inside its label, so tapping the label always opens the picker on phones. */
+    .picker {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 56px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .picker.primary { background: var(--accent); border-color: var(--accent); color: #04130c; }
+    .picker:active { transform: scale(0.98); }
+    .picker input[type="file"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      overflow: hidden;
+    }
+    .picker:focus-within { outline: 2px solid #fff; outline-offset: 2px; }
+
+    .drop {
+      margin-top: 12px;
+      padding: 18px;
+      border: 2px dashed var(--line);
+      border-radius: 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .drop.over { border-color: var(--accent); color: var(--text); }
+    @media (hover: none) { .drop { display: none; } }
+
+    .queue, .gallery { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .thumb {
+      flex: none;
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      background: #232733;
+      object-fit: cover;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      color: var(--muted);
+      overflow: hidden;
+    }
+    .info { flex: 1; min-width: 0; }
+    .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sub { color: var(--muted); font-size: 0.85rem; }
+    .sub.err { color: var(--danger); }
+    .bar { height: 6px; margin-top: 6px; background: #232733; border-radius: 3px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+
+    .gallery { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .tile {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .tile .preview {
+      aspect-ratio: 1;
+      background: #232733;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 0;
+      border: 0;
+      width: 100%;
+      cursor: pointer;
+    }
+    .tile .preview img, .tile .preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .tile .meta { padding: 8px 10px; font-size: 0.85rem; }
+    .tile a { color: var(--accent); font-weight: 600; text-decoration: none; }
+    .empty { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Upload</h1>
+    <p class="lead">Choose photos, videos or any file from your phone or computer.</p>
+
+    <div class="pickers">
+      <label class="picker primary">
+        <input id="pick-media" type="file" accept="image/*,video/*" multiple />
+        Photos &amp; videos
+      </label>
+      <label class="picker">
+        <input id="pick-camera" type="file" accept="image/*,video/*" capture="environment" />
+        Use camera
+      </label>
+      <label class="picker">
+        <input id="pick-files" type="file" multiple />
+        Any file
+      </label>
+    </div>
+    <div class="drop" id="drop">or drag and drop files here</div>
+
+    <h2 id="queue-title" hidden>Uploading</h2>
+    <ul class="queue" id="queue"></ul>
+
+    <h2>Uploaded files</h2>
+    <ul class="gallery" id="gallery"><li class="empty">Loading…</li></ul>
+  </main>
+
+  <script>
+    const MAX_FILE_SIZE = 200 * 1024 * 1024
+    const queue = document.getElementById('queue')
+    const queueTitle = document.getElementById('queue-title')
+    const gallery = document.getElementById('gallery')
+    const drop = document.getElementById('drop')
+
+    for (const id of ['pick-media', 'pick-camera', 'pick-files']) {
+      const input = document.getElementById(id)
+      input.addEventListener('change', () => {
+        handleFiles(input.files)
+        // Reset so picking the same file again still fires "change".
+        input.value = ''
+      })
+    }
+
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over') })
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'))
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault()
+      drop.classList.remove('over')
+      handleFiles(e.dataTransfer.files)
+    })
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B'
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB'
+      return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag)
+      if (className) node.className = className
+      if (text != null) node.textContent = text
+      return node
+    }
+
+    async function handleFiles(fileList) {
+      const files = Array.from(fileList || [])
+      if (!files.length) return
+      queueTitle.hidden = false
+      // Upload one at a time so slow mobile connections are not overloaded.
+      for (const file of files) await uploadFile(file)
+      loadGallery()
+    }
+
+    async function uploadFile(file) {
+      const row = el('li', 'item')
+      const thumb = file.type.startsWith('image/') ? el('img', 'thumb') : el('div', 'thumb', file.type.startsWith('video/') ? 'VIDEO' : 'FILE')
+      if (thumb.tagName === 'IMG') thumb.src = URL.createObjectURL(file)
+      const info = el('div', 'info')
+      const sub = el('div', 'sub', formatSize(file.size) + ' · waiting')
+      const bar = el('div', 'bar')
+      const fill = el('span')
+      bar.append(fill)
+      info.append(el('div', 'name', file.name || 'file'), sub, bar)
+      row.append(thumb, info)
+      queue.prepend(row)
+
+      const fail = (msg) => { sub.textContent = msg; sub.classList.add('err') }
+
+      if (file.size === 0) return fail('This file is empty')
+      if (file.size > MAX_FILE_SIZE) return fail('Too large — maximum is 200 MB')
+
+      try {
+        const startRes = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: file.name, type: file.type, size: file.size }),
+        })
+        const start = await startRes.json()
+        if (!startRes.ok) throw new Error(start.error || 'Could not start upload')
+
+        for (let i = 0; i < start.chunks; i++) {
+          const part = file.slice(i * start.chunkSize, (i + 1) * start.chunkSize)
+          let ok = false
+          for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+            const res = await fetch(`/api/files/${start.id}/chunks/${i}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/octet-stream' },
+              body: part,
+            })
+            ok = res.ok
+          }
+          if (!ok) throw new Error('Upload failed, check your connection and try again')
+          const pct = Math.round(((i + 1) / start.chunks) * 100)
+          fill.style.width = pct + '%'
+          sub.textContent = `${formatSize(file.size)} · ${pct}%`
+        }
+
+        const doneRes = await fetch(`/api/files/${start.id}/complete`, { method: 'POST' })
+        if (!doneRes.ok) throw new Error((await doneRes.json()).error || 'Upload failed')
+        sub.textContent = formatSize(file.size) + ' · uploaded ✓'
+      } catch (err) {
+        fail(err.message || 'Upload failed')
+      }
+    }
+
+    // Rebuilds a stored file from its chunks and returns a local URL the browser can show.
+    const blobUrls = {}
+    async function fileUrl(meta) {
+      if (blobUrls[meta.id]) return blobUrls[meta.id]
+      const parts = []
+      for (let i = 0; i < meta.chunks; i++) {
+        const res = await fetch(`/api/files/${meta.id}/chunks/${i}`)
+        if (!res.ok) throw new Error('Could not load file')
+        parts.push(await res.blob())
+      }
+      blobUrls[meta.id] = URL.createObjectURL(new Blob(parts, { type: meta.type }))
+      return blobUrls[meta.id]
+    }
+
+    async function loadGallery() {
+      try {
+        const res = await fetch('/api/files')
+        const { files } = await res.json()
+        gallery.replaceChildren()
+        if (!files.length) {
+          gallery.append(el('li', 'empty', 'No files yet.'))
+          return
+        }
+        for (const meta of files) gallery.append(renderTile(meta))
+      } catch {
+        gallery.replaceChildren(el('li', 'empty', 'Could not load files.'))
+      }
+    }
+
+    function renderTile(meta) {
+      const tile = el('li', 'tile')
+      const preview = el('button', 'preview')
+      preview.type = 'button'
+      const isImage = meta.type.startsWith('image/')
+      const isVideo = meta.type.startsWith('video/')
+      const meta_ = el('div', 'meta')
+      const name = el('div', 'name', meta.name)
+      const link = el('a', null, 'Download')
+      link.href = '#'
+      meta_.append(name, el('div', 'sub', formatSize(meta.size)), link)
+      tile.append(preview, meta_)
+
+      const show = async () => {
+        try {
+          const url = await fileUrl(meta)
+          if (isImage) {
+            const img = el('img'); img.src = url; img.alt = meta.name
+            preview.replaceChildren(img)
+          } else if (isVideo) {
+            const video = el('video'); video.src = url; video.controls = true; video.playsInline = true
+            preview.replaceChildren(video)
+          }
+          return url
+        } catch {
+          preview.textContent = 'Could not load'
+        }
+      }
+
+      // Small images load automatically; videos and other files load when tapped.
+      if (isImage && meta.size <= 8 * 1024 * 1024) show()
+      else preview.textContent = isVideo ? '▶ Tap to play' : isImage ? 'Tap to view' : (meta.name.split('.').pop() || 'FILE').toUpperCase()
+      preview.addEventListener('click', () => { if (isImage || isVideo) show() })
+
+      link.addEventListener('click', async (e) => {
+        e.preventDefault()
+        link.textContent = 'Preparing…'
+        try {
+          const url = await fileUrl(meta)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = meta.name
+          document.body.append(a)
+          a.click()
+          a.remove()
+        } finally {
+          link.textContent = 'Download'
+        }
+      })
+      return tile
+    }
+
+    loadGallery()
+  </script>
+</body>
+</html>
